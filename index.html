@@ -269,13 +269,15 @@ async function carregarAteQuantidade() {
   while (totalExibido < qtdDesejada && nextPage && !abortar) {
     try {
       const response = await fetch(nextPage);
-      if (!response.ok) throw new Error("Erro na API");
+      if (!response.ok) {
+        throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
+      }
 
       const data = await response.json();
 
       let adicionadosNaPagina = 0;
 
-      for (const item of data.results) {
+      for (const item of data.results || []) {  // segurança extra caso results seja undefined
         if (totalExibido >= qtdDesejada || abortar) break;
         const adicionou = adicionarProduto(item);
         if (adicionou) {
@@ -284,21 +286,25 @@ async function carregarAteQuantidade() {
         }
       }
 
-      nextPage = data.next;
+      // Correção crítica: força https no link de próxima página
+      nextPage = data.next 
+        ? data.next.replace(/^http:/, 'https:')   // ou .replace('http://', 'https://')
+        : null;
 
-      // Se não adicionou nada nesta página e ainda tem próxima, continua
+      // Delay ajustado
       if (adicionadosNaPagina === 0 && nextPage) {
-        await delay(800); // delay menor se página veio "vazia" de lojas permitidas
+        await delay(800); // página "vazia" de lojas permitidas
       } else if (nextPage) {
-        await delay(1200); // delay normal entre páginas com conteúdo
+        await delay(1200); // delay normal entre páginas
       }
 
-      if (!nextPage || data.results.length === 0) {
+      if (!nextPage || (data.results || []).length === 0) {
         break;
       }
 
     } catch (err) {
-      console.error("Erro ao carregar:", err);
+      console.error("Erro ao carregar página:", nextPage, err);
+      // Opcional: alert ou mensagem no DOM se quiser
       break;
     }
   }
