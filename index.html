@@ -169,6 +169,8 @@ let nextPage = URL_INICIAL;
 let totalExibido = 0;
 let carregando = false;
 let abortar = false;
+let paginasCarregadas = 0;
+const MAX_PAGINAS = 20; // segurança contra loop infinito
 
 const lojasPermitidas = new Set(["Amazon", "Mercado Livre"]);
 
@@ -204,25 +206,19 @@ function criarSecaoLoja(loja) {
   `;
 
   document.getElementById("conteudo").appendChild(secao);
-  return secao;
 }
 
 function adicionarProduto(item) {
-  const loja = item.store.name;
+  const loja = item.store?.name;
 
-  // Ignora completamente qualquer loja que não seja Amazon ou Mercado Livre
-  if (!lojasPermitidas.has(loja)) {
+  if (!loja || !lojasPermitidas.has(loja)) {
     return false;
   }
 
-  // Verifica se a loja está ativada no checkbox
   const amazonAtivo = document.getElementById("amazonCheck").checked;
   const mlAtivo = document.getElementById("mercadolivreCheck").checked;
 
-  if (
-    (loja === "Amazon" && !amazonAtivo) ||
-    (loja === "Mercado Livre" && !mlAtivo)
-  ) {
+  if ((loja === "Amazon" && !amazonAtivo) || (loja === "Mercado Livre" && !mlAtivo)) {
     return false;
   }
 
@@ -239,7 +235,7 @@ function adicionarProduto(item) {
     <h4>${item.title}</h4>
     <div class="price">R$ ${item.price}</div>
     ${item.old_price ? `<div class="old-price">R$ ${item.old_price}</div>` : ""}
-    ${item.coupons.length > 0 ? 
+    ${item.coupons?.length > 0 ? 
       `<div class="cupom" onclick="copiarCupom(this, '${item.coupons[0]}')">
         Cupom: ${item.coupons[0]}
       </div>` : ""}
@@ -259,6 +255,7 @@ async function carregarAteQuantidade() {
   if (carregando) return;
   carregando = true;
   abortar = false;
+  paginasCarregadas = 0;
 
   const qtdDesejada = parseInt(document.getElementById("qtdDesejada").value) || 30;
   document.getElementById("conteudo").innerHTML = "";
@@ -266,66 +263,75 @@ async function carregarAteQuantidade() {
   document.getElementById("total").innerText = "0";
   nextPage = URL_INICIAL;
 
-  while (totalExibido < qtdDesejada && nextPage && !abortar) {
+  // Indicador simples de carregamento
+  const header = document.querySelector("header");
+  header.style.opacity = "0.7";
+  header.innerHTML += '<span id="loading-msg" style="margin-left:15px; color:#ffc107;">Carregando páginas...</span>';
+
+  while (totalExibido < qtdDesejada && nextPage && !abortar && paginasCarregadas < MAX_PAGINAS) {
+    paginasCarregadas++;
+    console.log(`Carregando página ${paginasCarregadas}: ${nextPage}`);
+
     try {
-      const response = await fetch(nextPage);
+      // Força HTTPS de forma robusta
+      const urlSegura = nextPage.replace(/^http:/i, 'https:').replace('http://', 'https://');
+      const response = await fetch(urlSegura);
+
       if (!response.ok) {
-        throw new Error(`Erro na API: ${response.status} ${response.statusText}`);
+        throw new Error(`Status ${response.status} - ${response.statusText}`);
       }
 
       const data = await response.json();
 
       let adicionadosNaPagina = 0;
 
-      for (const item of data.results || []) {  // segurança extra caso results seja undefined
+      for (const item of data.results || []) {
         if (totalExibido >= qtdDesejada || abortar) break;
         const adicionou = adicionarProduto(item);
         if (adicionou) {
           adicionadosNaPagina++;
-          await delay(80); // delay suave entre cards
+          await delay(60); // um pouco mais rápido, mas ainda suave
         }
       }
 
-      // Correção crítica: força https no link de próxima página
+      // Próxima página: força https novamente
       nextPage = data.next 
-        ? data.next.replace(/^http:/, 'https:')   // ou .replace('http://', 'https://')
+        ? data.next.replace(/^http:/i, 'https:').replace('http://', 'https://')
         : null;
 
-      // Delay ajustado
-      if (adicionadosNaPagina === 0 && nextPage) {
-        await delay(800); // página "vazia" de lojas permitidas
-      } else if (nextPage) {
-        await delay(1200); // delay normal entre páginas
-      }
+      console.log(`Página ${paginasCarregadas} concluída. Adicionados: ${adicionadosNaPagina} | Próxima: ${nextPage || 'fim'}`);
 
-      if (!nextPage || (data.results || []).length === 0) {
-        break;
+      if (adicionadosNaPagina === 0 && nextPage) {
+        await delay(600); // acelera se página veio sem itens úteis
+      } else if (nextPage) {
+        await delay(1000);
       }
 
     } catch (err) {
-      console.error("Erro ao carregar página:", nextPage, err);
-      // Opcional: alert ou mensagem no DOM se quiser
-      break;
+      console.error(`Erro na página ${paginasCarregadas}:`, err);
+      nextPage = null; // para o loop
     }
   }
 
   carregando = false;
+  document.getElementById("loading-msg")?.remove();
+  header.style.opacity = "1";
 
   if (totalExibido < qtdDesejada) {
-    console.log(`Não encontrou mais ofertas. Total exibido: ${totalExibido}/${qtdDesejada}`);
+    console.log(`Fim do carregamento. Total: ${totalExibido}/${qtdDesejada} (páginas vistas: ${paginasCarregadas})`);
   }
 }
 
 function atualizar() {
   if (carregando) {
     abortar = true;
-    setTimeout(atualizar, 400); // espera um pouco e tenta reiniciar
+    setTimeout(atualizar, 500);
     return;
   }
   carregarAteQuantidade();
 }
 
-// Inicia ao carregar a página
+// Inicia ao carregar
 atualizar();
 </script>
 </body>
