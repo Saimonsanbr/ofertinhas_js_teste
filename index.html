@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Monitor de Ofertas</title>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f4f4;
+  margin: 0;
+}
+
+header {
+  background: #222;
+  color: white;
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+input[type="number"] {
+  width: 80px;
+  padding: 6px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+button {
+  padding: 8px 16px;
+  cursor: pointer;
+  border: none;
+  border-radius: 5px;
+  font-weight: bold;
+}
+
+.btn-primary { background: #28a745; color: white; }
+
+.info {
+  padding: 10px 20px;
+}
+
+.loja-secao {
+  padding: 20px;
+}
+
+.loja-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.loja-header img {
+  height: 30px;
+}
+
+.container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 15px;
+}
+
+.card {
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.card img {
+  width: 100%;
+  height: 180px;
+  object-fit: contain;
+}
+
+.price {
+  font-weight: bold;
+  color: green;
+  font-size: 18px;
+}
+
+.old-price {
+  text-decoration: line-through;
+  color: #888;
+  font-size: 14px;
+}
+
+.cupom {
+  background: #ffc107;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: monospace;
+  display: inline-block;
+  cursor: pointer;
+  margin-top: 8px;
+  user-select: none;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+.cupom:active {
+  transform: scale(0.96);
+  transition: transform 0.08s ease;
+}
+
+.cupom.copiado {
+  background: #28a745;
+  color: white;
+  transform: scale(1.08) translateY(-2px);
+  box-shadow: 0 4px 14px rgba(40, 167, 69, 0.4);
+}
+
+footer {
+  text-align: center;
+  padding: 20px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="controls">
+    <label>
+      <input type="number" id="qtdDesejada" value="30" min="1" step="5">
+      Ofertas desejadas
+    </label>
+
+    <label>
+      <input type="checkbox" id="amazonCheck" checked> Amazon
+    </label>
+
+    <label>
+      <input type="checkbox" id="mercadolivreCheck" checked> Mercado Livre
+    </label>
+
+    <button class="btn-primary" onclick="atualizar()">Atualizar</button>
+  </div>
+
+  <div>Total exibido: <span id="total">0</span></div>
+</header>
+
+<div id="conteudo"></div>
+
+<footer>Uso pessoal</footer>
+
+<script>
+const URL_INICIAL = "https://admin.pechinchou.com.br/api/v2/produto/listar_produtos_por_opcao_cliente_v3/home/?page=1";
+
+let nextPage = URL_INICIAL;
+let totalExibido = 0;
+let carregando = false;
+let abortar = false;
+
+const lojasPermitidas = new Set(["Amazon", "Mercado Livre"]);
+
+const logos = {
+  "Amazon": "https://assets.pechinchou.com.br/media/img/store/03/03/Amazon.png.jpg",
+  "Mercado Livre": "https://assets.pechinchou.com.br/media/img/store/09/15/Screenshot_84.png"
+};
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function copiarCupom(elemento, texto) {
+  navigator.clipboard.writeText(texto)
+    .then(() => {
+      elemento.classList.add('copiado');
+      setTimeout(() => elemento.classList.remove('copiado'), 1600);
+    })
+    .catch(err => console.error("Erro ao copiar:", err));
+}
+
+function criarSecaoLoja(loja) {
+  const secao = document.createElement("div");
+  secao.className = "loja-secao";
+  secao.id = "secao-" + loja.replace(/\s/g, "");
+
+  secao.innerHTML = `
+    <div class="loja-header">
+      <img src="${logos[loja]}" />
+      <h3>${loja}</h3>
+    </div>
+    <div class="container" id="container-${loja.replace(/\s/g, "")}"></div>
+  `;
+
+  document.getElementById("conteudo").appendChild(secao);
+  return secao;
+}
+
+function adicionarProduto(item) {
+  const loja = item.store.name;
+
+  // Ignora completamente qualquer loja que não seja Amazon ou Mercado Livre
+  if (!lojasPermitidas.has(loja)) {
+    return false;
+  }
+
+  // Verifica se a loja está ativada no checkbox
+  const amazonAtivo = document.getElementById("amazonCheck").checked;
+  const mlAtivo = document.getElementById("mercadolivreCheck").checked;
+
+  if (
+    (loja === "Amazon" && !amazonAtivo) ||
+    (loja === "Mercado Livre" && !mlAtivo)
+  ) {
+    return false;
+  }
+
+  if (!document.getElementById("secao-" + loja.replace(/\s/g, ""))) {
+    criarSecaoLoja(loja);
+  }
+
+  const container = document.getElementById("container-" + loja.replace(/\s/g, ""));
+  const card = document.createElement("div");
+  card.className = "card";
+
+  card.innerHTML = `
+    <img src="${item.image}">
+    <h4>${item.title}</h4>
+    <div class="price">R$ ${item.price}</div>
+    ${item.old_price ? `<div class="old-price">R$ ${item.old_price}</div>` : ""}
+    ${item.coupons.length > 0 ? 
+      `<div class="cupom" onclick="copiarCupom(this, '${item.coupons[0]}')">
+        Cupom: ${item.coupons[0]}
+      </div>` : ""}
+    <br><br>
+    <a href="${item.long_url}" target="_blank">
+      <button>Ver oferta</button>
+    </a>
+  `;
+
+  container.appendChild(card);
+  totalExibido++;
+  document.getElementById("total").innerText = totalExibido;
+  return true;
+}
+
+async function carregarAteQuantidade() {
+  if (carregando) return;
+  carregando = true;
+  abortar = false;
+
+  const qtdDesejada = parseInt(document.getElementById("qtdDesejada").value) || 30;
+  document.getElementById("conteudo").innerHTML = "";
+  totalExibido = 0;
+  document.getElementById("total").innerText = "0";
+  nextPage = URL_INICIAL;
+
+  while (totalExibido < qtdDesejada && nextPage && !abortar) {
+    try {
+      const response = await fetch(nextPage);
+      if (!response.ok) throw new Error("Erro na API");
+
+      const data = await response.json();
+
+      let adicionadosNaPagina = 0;
+
+      for (const item of data.results) {
+        if (totalExibido >= qtdDesejada || abortar) break;
+        const adicionou = adicionarProduto(item);
+        if (adicionou) {
+          adicionadosNaPagina++;
+          await delay(80); // delay suave entre cards
+        }
+      }
+
+      nextPage = data.next;
+
+      // Se não adicionou nada nesta página e ainda tem próxima, continua
+      if (adicionadosNaPagina === 0 && nextPage) {
+        await delay(800); // delay menor se página veio "vazia" de lojas permitidas
+      } else if (nextPage) {
+        await delay(1200); // delay normal entre páginas com conteúdo
+      }
+
+      if (!nextPage || data.results.length === 0) {
+        break;
+      }
+
+    } catch (err) {
+      console.error("Erro ao carregar:", err);
+      break;
+    }
+  }
+
+  carregando = false;
+
+  if (totalExibido < qtdDesejada) {
+    console.log(`Não encontrou mais ofertas. Total exibido: ${totalExibido}/${qtdDesejada}`);
+  }
+}
+
+function atualizar() {
+  if (carregando) {
+    abortar = true;
+    setTimeout(atualizar, 400); // espera um pouco e tenta reiniciar
+    return;
+  }
+  carregarAteQuantidade();
+}
+
+// Inicia ao carregar a página
+atualizar();
+</script>
+</body>
+</html>
